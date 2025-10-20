@@ -22,7 +22,7 @@ services:
       PG_PORT: 5432
       PG_USER: user
       PG_PASSWORD: password
-      PG_DBNAME: DMART_CRT_01
+      PG_OUTPUT_DBNAME: DMART_CRT_01
       S3_BUCKET: your-s3-bucket
     ports:
       - "80:80"

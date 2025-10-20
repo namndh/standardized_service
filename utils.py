@@ -5,11 +5,13 @@ from typing import Literal
 import pandas as pd
 import numpy as np
 import psycopg2
+from sqlalchemy import create_engine
 
 from ta_configs import TA_CONFIG
 
 logger = logging.getLogger(__name__)
 
+PG_INPUT_DBNAME = "raw_ohlcv"
 
 # ==============================================================
 # Executor
@@ -60,13 +62,13 @@ def add_ta_features(
     return compute_indicators(df.copy(), config)
 
 
-def get_db_config():
+def get_db_config(db_env_var: str = "PG_OUTPUT_DBNAME") -> dict:
     return {
         "host": os.environ.get("PG_HOST"),
         "port": int(os.environ.get("PG_PORT")),
         "user": os.environ.get("PG_USER"),
         "password": os.environ.get("PG_PASSWORD"),
-        "dbname": os.environ.get("PG_DBNAME"),
+        "dbname": os.environ.get(db_env_var),
     }
 
 def save_to_db(
@@ -77,6 +79,7 @@ def save_to_db(
     from sqlalchemy import create_engine
 
     conn_params = get_db_config()
+    conn = None
     try:
         conn = psycopg2.connect(**conn_params)
         engine = create_engine("postgresql+psycopg2://", creator=lambda: conn)
@@ -93,7 +96,7 @@ def save_to_db(
         raise
 
     finally:
-        if 'conn' in locals():
+        if conn is not None:
             conn.close()
             logger.info("🔒 Database connection closed")
 
@@ -102,3 +105,47 @@ def standardize_data(file_path: str):
     df = pd.read_parquet(file_path)
     df_features = add_ta_features(df)
     save_to_db(df_features, table_name="crma_ta")
+
+
+def dump_parquet_to_postgres(file_path: str, db_config: dict, table_name: str = "ohlcv"):
+    """
+    Load a Parquet file into a PostgreSQL table (default: ohlcv).
+    """
+    logger.info(f"Loading Parquet file {file_path} into table {table_name}")
+    df = pd.read_parquet(file_path)
+    db_url = f"postgresql+psycopg2://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}"
+    engine = create_engine(db_url)
+    df.to_sql(table_name, engine, if_exists='append', index=False)
+    logger.info(f"Loaded {len(df)} rows into {table_name}")
+
+def standardize_data_from_row(row: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute TA features for a single row DataFrame.
+    Returns a DataFrame for the row.
+    """
+    return add_ta_features(row)
+
+def run_ohlcv_listener(db_config: dict):
+    import psycopg2
+    import select
+    import json
+    logger.info("Starting OHLCV listener daemon...")
+    conn = psycopg2.connect(**db_config)
+    conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+    cur = conn.cursor()
+    cur.execute("LISTEN new_ohlcv;")
+    while True:
+        if select.select([conn], [], [], 5) == ([], [], []):
+            continue
+        conn.poll()
+        while conn.notifies:
+            notify = conn.notifies.pop(0)
+            logger.info(f"Received NOTIFY: {notify.payload}")
+            try:
+                row = pd.DataFrame([json.loads(notify.payload)])
+                df_features = standardize_data_from_row(row)
+                save_to_db(df_features, table_name="crma_ta", if_exists="append")
+                logger.info("Transformed features saved to crma_ta table.")
+            except Exception as e:
+                logger.error(f"Failed to process new OHLCV row: {e}")
+
