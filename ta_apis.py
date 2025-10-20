@@ -1,5 +1,4 @@
-from fastapi import FastAPI, Form, HTTPException
-import pandas as pd
+from fastapi import FastAPI, HTTPException
 import boto3
 import os
 import logging
@@ -41,7 +40,7 @@ def get_file_path(file_name: str, extension: str = ".parquet") -> str | None:
     """,
     response_description="Status and details of the enrichment process"
 )
-async def enrich_ta(file_name: str = Form(...)):
+async def enrich_ta(file_name: str):
     file_path = get_file_path(file_name)
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")

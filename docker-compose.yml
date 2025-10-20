@@ -25,7 +25,7 @@ services:
       PG_DBNAME: DMART_CRT_01
       S3_BUCKET: your-s3-bucket
     ports:
-      - "80:80"
+      - "8000:8000"
     volumes:
       - .:/app
 

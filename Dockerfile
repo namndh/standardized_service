@@ -11,4 +11,4 @@ COPY . .
 
 EXPOSE 80
 
-CMD ["uvicorn", "ta_apis:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "ta_apis:app", "--host", "0.0.0.0", "--port", "8000"]
