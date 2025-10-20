@@ -1,0 +1,49 @@
+from fastapi import FastAPI, Form, HTTPException
+import pandas as pd
+import boto3
+import os
+import logging
+from utils import standardize_data
+
+app = FastAPI(title="TA service")
+
+S3_BUCKET = os.environ.get("S3_BUCKET")
+S3_PREFIX = "data/"
+LOCAL_PATH = "./data"
+
+s3_client = boto3.client("s3")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def get_file_path(file_name: str, extension: str = ".parquet") -> str | None:
+    local_file = os.path.join(LOCAL_PATH, file_name + extension)
+    logger.info(f"Checking data file {local_file}")
+    if os.path.exists(local_file):
+        return local_file
+    try:
+        s3_client.head_object(Bucket=S3_BUCKET, Key=S3_PREFIX + file_name)
+        s3_client.download_file(S3_BUCKET, S3_PREFIX + file_name, local_file)
+        return local_file
+    except s3_client.exceptions.NoSuchKey:
+        pass
+    except Exception:
+        pass
+    return None
+
+@app.post(
+    "/ta/enrich",
+    summary="Enrich data with TA features and save to DB",
+    description="""
+    This endpoint takes a Parquet file name, loads the file from local storage or S3,
+    computes technical analysis (TA) features using pre-defined rules, and inserts the results into the internal PostgreSQL database.
+    Returns a success message and row count.
+    """,
+    response_description="Status and details of the enrichment process"
+)
+async def enrich_ta(file_name: str = Form(...)):
+    file_path = get_file_path(file_name)
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File not found")
+    standardize_data(file_path)
+    return {"status": "success", "message": "TA features added and saved to DB"}

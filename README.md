@@ -1,1 +1,0 @@
-# standardized_service
