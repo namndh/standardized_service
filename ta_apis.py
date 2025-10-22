@@ -2,7 +2,28 @@ from fastapi import FastAPI, HTTPException
 import boto3
 import os
 import logging
-from utils import standardize_data
+import threading
+from contextlib import asynccontextmanager
+
+from utils import standardize_data, get_db_config, run_ohlcv_listener, PG_INPUT_DBNAME
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    On application startup, set up the database trigger and start the listener daemon
+    in a background thread.
+    """
+    logger.info("Starting up and initializing listener...")
+    db_config = get_db_config(PG_INPUT_DBNAME)
+
+    listener_thread = threading.Thread(target=run_ohlcv_listener, args=(db_config,), daemon=True)
+    listener_thread.start()
+    logger.info("Started OHLCV listener in a background thread.")
+
+    yield
+
+    logger.info("Shutting down.")
 
 app = FastAPI(title="TA service")
 
